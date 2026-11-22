@@ -1,0 +1,3 @@
+*.backup-*
+*.report-*.txt
+.DS_Store

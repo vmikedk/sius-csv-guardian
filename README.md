@@ -1,4 +1,4 @@
-# SIUS CSV Guardian 2.0
+# SIUS CSV Guardian 3.0
 
 A cautious Windows utility that prepares SIUS CSV exports for DGI SPConnector while preserving every shooting-session row.
 
@@ -9,57 +9,53 @@ The utility changes only the third semicolon-separated field when its complete v
 - `0` becomes `False`
 - `1` becomes `True`
 
-It does not merge, deduplicate, reorder, or delete rows. If the same shooter has multiple sessions, each session remains a separate row in its original position.
+SPConnector 1.3.0 reads that field with `Boolean.Parse`, which only accepts `False`/`True`. Rows are never merged, deduplicated or reordered. If the same shooter has several sessions, each stays a separate row.
 
-## Important safety limit
+By default the **original file is not touched**: the repaired copy is written to an `Upload` folder next to it (`-OutputDir` to change). Point SPConnector at that copy. `-InPlace` modifies the source instead and makes a `.backup-YYYYMMDD-HHMMSS` first.
 
-An observed SPConnector upload failed when `PlayerNumber` was `0`, but the correct SIUS schema and replacement rule have not been validated. If a header named `PlayerNumber` exists, the utility reports the affected row numbers but does **not** change or remove them. If no such header exists, it says that detection was not possible. Never invent a player number.
+## Shooter number 0
+
+An upload containing a result group with shooter number 0 made DGI answer HTTP 500. The utility finds these rows by position (field 1, `-PlayerColumn` to change) when the file has no header, or through a `PlayerNumber` header when there is one. A first row with a non-numeric shooter field is treated as a header.
+
+- Default: rows are kept and reported (exit code 2).
+- `-ExcludePlayerZero` (or `Run-SIUS-CSV-Guardian-ExcludePlayerZero.cmd`): rows are removed from the repaired copy and saved to `<name>.skipped.csv`. They are **never reassigned** to another shooter; review them by hand.
+
+## Validation
+
+- Field count per row is compared with `-ExpectedFields` (default: the most common count in the file; SIUS Data 7.5p exports 28).
+- A third field that is not `0/1/True/False` is reported with row and field number and left unchanged.
+- Unparseable rows are reported and left unchanged. The remaining rows are still processed.
 
 ## Windows use
 
-1. Finish the shooting session and close anything that may be writing the CSV.
+1. Finish the shooting session. A file still open in SIUS is read with shared access and retried a few times; if it is still locked, close SIUS or try again.
 2. Extract the ZIP to a normal folder.
-3. Double-click `Run-SIUS-CSV-Guardian.cmd` and select the CSV.
+3. Double-click `Run-SIUS-CSV-Guardian.cmd` (or the `-ExcludePlayerZero` variant) and select the CSV.
 4. Read the report. Exit code 2 / a warning means unresolved rows need review.
-5. Upload through SPConnector only after the report is acceptable.
-
-When a confirmed change is made, the original is copied beside the CSV as `.backup-YYYYMMDD-HHMMSS`. The repaired file is written using a temporary file and atomic replacement. A timestamped UTF-8 report is always created.
+5. Upload the copy from the `Upload` folder through SPConnector, then check the result in DGI.
 
 ## Dry run and unattended use
 
 ```powershell
-PowerShell.exe -NoProfile -ExecutionPolicy Bypass -File .\SIUS-CSV-Guardian.ps1 -Path "C:\SIUS\SiusData\Data\shooting.csv" -DryRun -NoGui
+PowerShell.exe -NoProfile -ExecutionPolicy Bypass -File .\SIUS-CSV-Guardian.ps1 -Path "C:\SIUS\SiusData\Data\20261114.csv" -DryRun -NoGui
 ```
 
-Remove `-DryRun` to repair. Use `-ReportPath` to choose the report location. Exit codes: `0` = completed without unresolved detected records; `2` = unresolved PlayerNumber 0 or malformed/short rows; other nonzero = error.
+Remove `-DryRun` to write the copy. Options: `-OutputDir`, `-ReportPath`, `-InPlace`, `-PlayerColumn`, `-ExpectedFields`, `-ExcludePlayerZero`. Exit codes: `0` = no unresolved rows; `2` = unresolved shooter 0 rows (not excluded), malformed/short/wrong-length rows or an unexpected third-field value; other nonzero = error.
 
 ## Compatibility and assumptions
 
 - Windows PowerShell 5.1 or PowerShell 7.
 - Semicolon-delimited CSV, including correctly escaped quoted fields.
-- The third field rule is positional, based on the known SIUS/SPConnector error.
-- UTF-8, UTF-8 BOM, UTF-16 LE, and UTF-16 BE are preserved. A BOM-less file is treated as UTF-8.
-- Embedded newlines inside quoted CSV fields are not supported; such exports need a real sample before support can be validated.
+- UTF-8, UTF-8 BOM, UTF-16 LE and UTF-16 BE are preserved. A BOM-less file that is not valid UTF-8 is handled byte for byte (for example Windows-1252), so characters such as æ, ø, å are not altered.
+- Embedded newlines inside quoted fields are not supported.
 
 ## Tests
 
-Pester 5 tests are in `tests/SIUS-CSV-Guardian.Tests.ps1`. From the extracted folder:
+Pester 5 tests are in `tests/SIUS-CSV-Guardian.Tests.ps1`:
 
 ```powershell
 Invoke-Pester .\tests
 ```
-
-The tests cover dry-run behavior, backup/report creation, quoted semicolons, repeated shooter/session rows, idempotence, and safe `PlayerNumber 0` reporting.
-
-## What we still need
-
-Please provide anonymized copies of:
-
-1. A real SIUS CSV that failed.
-2. The corresponding DGI/SPConnector error log.
-3. If possible, one CSV that uploaded successfully.
-
-Replace names and personal details consistently, but preserve delimiters, headers, field order, zero values, quoting, encoding, and multiple-session rows. With those samples, the positional assumption and a safe policy for `PlayerNumber 0` can be validated.
 
 ## Open source
 
